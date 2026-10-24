@@ -380,8 +380,18 @@ namespace NCDK
 
         private static string _cachedGameStateFolder;
 
+        /// <summary>
+        /// Overrides the save folder for the whole process. Tests set it to a temp directory: without
+        /// this, every fixture that calls <c>Save()</c> wrote a new "test-*" save into the player's real
+        /// folder, and the game (which loads the most recent file) picked a test save on the next launch.
+        /// </summary>
+        public static string GameStateFolderOverride { get; set; }
+
         public static string GetGameStateFolder()
         {
+            if (!string.IsNullOrEmpty(GameStateFolderOverride))
+                return GameStateFolderOverride.Replace('\\', '/');
+
             if (!string.IsNullOrEmpty(_cachedGameStateFolder)) return _cachedGameStateFolder;
 
             var persistentDataPath = GetApplicationPersistentDataFolder();
