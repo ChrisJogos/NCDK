@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.Playables;
+using NCDK.Refs;
 
 namespace NCDK.Gameplay.Timeline
 {
@@ -8,11 +9,11 @@ namespace NCDK.Gameplay.Timeline
     /// Works with Gamepad, Keyboard, and Mouse as per EInput extensions.
     /// </summary>
     [RequireComponent(typeof(PlayableDirector))]
-    public class PlayableDirectorAccelerator : MonoBehaviour
+    public class PlayableDirectorAccelerator : ValidatedMonoBehaviour
     {
         [Header("References")]
         [Tooltip("Optional. Se vazio, vai tentar pegar do próprio GameObject.")]
-        [SerializeField] private PlayableDirector _director;
+        [SerializeField,Self] private PlayableDirector _director;
 
         [Header("Settings - Minigame")]
         [Tooltip("Velocidade base padrão (normalmente 1).")]
@@ -31,13 +32,6 @@ namespace NCDK.Gameplay.Timeline
 
         private void Awake()
         {
-            if (!TryGetComponent(out _director))
-            {
-                Debug.LogError("PlayableDirectorAccelerator: No PlayableDirector found on this GameObject.");
-                enabled = false;
-                return;
-            }
-            
             _currentSpeed = _baseSpeed;
         }
 
