@@ -1,4 +1,4 @@
-using System;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -38,6 +38,31 @@ namespace NCDK.Timeline {
             _canvas.enabled = alpha > 0;
             c.a = alpha;
             _fadeImage.color = c;
+        }
+
+        /// <summary>
+        /// Ramps the overlay from its current alpha to <paramref name="targetAlpha"/> using unscaled time.
+        /// </summary>
+        /// <remarks>
+        /// Used after a cutscene stops: the overlay outlives the Timeline, so whoever takes over the scene
+        /// decides when (and how fast) the cover leaves the screen. Colours are not blended - the overlay is
+        /// always black, only the alpha moves.
+        /// </remarks>
+        public IEnumerator FadeTo(float targetAlpha, float duration) {
+            if (duration <= 0f) {
+                SetColor(Color.black, targetAlpha);
+                yield break;
+            }
+
+            var startAlpha = LastAlpha;
+            var elapsed = 0f;
+            while (elapsed < duration) {
+                SetColor(Color.black, Mathf.Lerp(startAlpha, targetAlpha, elapsed / duration));
+                yield return null;
+                elapsed += Time.unscaledDeltaTime;
+            }
+
+            SetColor(Color.black, targetAlpha);
         }
 
     }
