@@ -34,11 +34,21 @@ namespace NCDK {
        }
 
        IEnumerator ClockTickRoutine() {
-          var wait = new WaitForSeconds(1.0f);
+          float elapsed = 0f;
+
           while (enabled) {
-             yield return wait;
-             UpdateTime();
-             _onClockTick.Invoke(); // Dispara o evento exposto no Inspector
+             // realTime means wall-clock time: the clock must keep ticking while the game is paused,
+             // so it accumulates unscaled delta. The other mode follows the game's time scale and
+             // freezes with it.
+             elapsed += realTime ? Time.unscaledDeltaTime : Time.deltaTime;
+
+             if (elapsed >= 1.0f) {
+                elapsed -= 1.0f;
+                UpdateTime();
+                _onClockTick.Invoke(); // Dispara o evento exposto no Inspector
+             }
+
+             yield return null;
           }
        }
 
