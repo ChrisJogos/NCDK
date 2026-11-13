@@ -29,6 +29,7 @@ namespace NCDK.Editor
         static bool _sceneDirty = true;
         static bool _assetsDirty = true;
         static double _lastRebuildTime;
+        static int _lastLoggedCount = -1;
 
         const double REBUILD_THROTTLE_SECONDS = 0.5;
         const int PREFABS_PER_FRAME = 20; // Adjust for performance vs speed
@@ -97,20 +98,21 @@ namespace NCDK.Editor
 
         static void IndexSceneObjects()
         {
-            for (int i = 0; i < SceneManager.sceneCount; i++)
+            // FindObjectsByType is global, not per scene: calling it inside the loop scans the whole
+            // project once per open scene and registers every object N times. Scan once, then bucket
+            // by the scene each object actually belongs to.
+            var sceneObjects = UnityEngine.Object.FindObjectsByType<IdentifiableMonoBehaviour>(
+                FindObjectsInactive.Include,
+                FindObjectsSortMode.None);
+
+            foreach (var obj in sceneObjects)
             {
-                Scene scene = SceneManager.GetSceneAt(i);
-                if (!scene.isLoaded) continue;
+                if (obj == null || obj.ID == SerializableGuid.Empty) continue;
 
-                var sceneObjects = UnityEngine.Object.FindObjectsByType<IdentifiableMonoBehaviour>(
-                    FindObjectsInactive.Include, 
-                    FindObjectsSortMode.None);
+                Scene scene = obj.gameObject.scene;
+                if (!scene.IsValid() || !scene.isLoaded) continue;
 
-                foreach (var obj in sceneObjects)
-                {
-                    if (obj == null || obj.ID == SerializableGuid.Empty) continue;
-                    AddToRegistry(_sceneRegistry, obj.ID, obj);
-                }
+                AddToRegistry(_sceneRegistry, obj.ID, obj);
             }
         }
 
@@ -191,8 +193,15 @@ namespace NCDK.Editor
                     Progress.Remove(_progressTaskId);
                     _progressTaskId = -1;
                 }
-                
-                Debug.Log($"[IdentifiableRegistry] Asset indexing complete. Total Identifiables: {GetRegisteredCount()}");
+
+                // Only report a change: an identical count means nothing new was indexed, and logging
+                // it on every import turned the Console into noise.
+                int count = GetRegisteredCount();
+                if (count != _lastLoggedCount)
+                {
+                    _lastLoggedCount = count;
+                    Debug.Log($"[IdentifiableRegistry] Asset indexing complete. Total Identifiables: {count}");
+                }
             }
         }
 
@@ -211,8 +220,9 @@ namespace NCDK.Editor
 
         public static bool TryGetObject(SerializableGuid guid, out UnityEngine.Object obj)
         {
-            if (_sceneDirty) Rebuild();
-
+            // Never rebuild here: this is called from OnGUI (the reference drawer repaints constantly),
+            // and a synchronous scene scan inside a repaint is what made the Inspector stall. The
+            // throttled EditorApplication.update pass owns rebuilding; until it runs, serve the cache.
             obj = null;
             if (guid == SerializableGuid.Empty) return false;
 
@@ -233,8 +243,6 @@ namespace NCDK.Editor
 
         public static List<UnityEngine.Object> GetAllObjects(SerializableGuid guid)
         {
-            if (_sceneDirty) Rebuild();
-
             List<UnityEngine.Object> combined = new List<UnityEngine.Object>();
             
             if (_sceneRegistry.TryGetValue(guid, out var sceneList))
@@ -252,10 +260,16 @@ namespace NCDK.Editor
 
         public static Dictionary<SerializableGuid, List<UnityEngine.Object>> GetAllRegistered()
         {
-            if (_sceneDirty) Rebuild();
+            // Same rule as TryGetObject: serve the cache, let the throttled update pass rebuild it.
+            // The lists are copied, never aliased: assigning the registry's own list back into the
+            // result would make every later AddRange mutate the cache.
+            var combined = new Dictionary<SerializableGuid, List<UnityEngine.Object>>();
 
-            var combined = new Dictionary<SerializableGuid, List<UnityEngine.Object>>(_sceneRegistry);
-            
+            foreach (var kvp in _sceneRegistry)
+            {
+                combined[kvp.Key] = new List<UnityEngine.Object>(kvp.Value);
+            }
+
             foreach (var kvp in _assetRegistry)
             {
                 if (combined.TryGetValue(kvp.Key, out var list))
@@ -268,7 +282,7 @@ namespace NCDK.Editor
                     combined[kvp.Key] = new List<UnityEngine.Object>(kvp.Value);
                 }
             }
-            
+
             return combined;
         }
 
@@ -365,16 +379,38 @@ namespace NCDK.Editor
 
     public class IdentifiableAssetPostprocessor : AssetPostprocessor
     {
+        // Assets that are rewritten by tooling on a timer and never contain an Identifiable. Reindexing
+        // for them is pure waste, and the NavMesh bake rewrites its data on every pass.
+        static readonly string[] IgnoredFolders =
+        {
+            "Assets/_game/Data/NavMesh/",
+        };
+
         static void OnPostprocessAllAssets(string[] importedAssets, string[] deletedAssets, string[] movedAssets, string[] movedFromAssetPaths)
         {
             foreach (string str in importedAssets.Concat(deletedAssets).Concat(movedAssets))
             {
-                if (str.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || str.EndsWith(".asset", StringComparison.OrdinalIgnoreCase))
+                if (!str.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) &&
+                    !str.EndsWith(".asset", StringComparison.OrdinalIgnoreCase))
                 {
-                    IdentifiableRegistry.MarkAssetsDirty();
-                    return;
+                    continue;
                 }
+
+                if (IsIgnored(str)) continue;
+
+                IdentifiableRegistry.MarkAssetsDirty();
+                return;
             }
+        }
+
+        static bool IsIgnored(string path)
+        {
+            foreach (string folder in IgnoredFolders)
+            {
+                if (path.StartsWith(folder, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+
+            return false;
         }
     }
 }
