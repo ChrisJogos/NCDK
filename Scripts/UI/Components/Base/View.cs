@@ -96,6 +96,10 @@ namespace NCDK.UI
             }
 
             // Attempt to re-select the object that was selected before the next view was opened.
+            // A view built with UI Toolkit has no uGUI EventSystem of its own: it falls back to the
+            // project-wide event system, and navigation is owned by the visual tree instead.
+            if (_eventSystem == null) return;
+
             var objectToSelect = _lastSelectedObject != null ? _lastSelectedObject : FirstSelectedObject();
             if (objectToSelect != null)
             {
@@ -106,6 +110,9 @@ namespace NCDK.UI
 
         void LateUpdate()
         {
+            // UI Toolkit views own their navigation; without an EventSystem there is nothing to do.
+            if (_eventSystem == null) return;
+
             // Keeps input pointed at this view even if another EventSystem was destroyed mid-frame.
             TakeOverInput();
 
@@ -196,6 +203,7 @@ namespace NCDK.UI
 
         private GameObject FirstSelectedObject()
         {
+            if (_eventSystem == null) return null;
             if (_eventSystem.firstSelectedGameObject != null) return _eventSystem.firstSelectedGameObject;
             var firstInteractable = GetComponentInChildren<UIInteractable>();
             return firstInteractable != null ? firstInteractable.gameObject : null;
