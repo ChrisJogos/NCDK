@@ -15,7 +15,8 @@ namespace NCDK
         Auto = 0,
         Xbox = 1,
         PlayStation = 2,
-        Nintendo = 3
+        Nintendo = 3,
+        Positional = 4
     }
 
     public static class EInput
@@ -38,11 +39,10 @@ namespace NCDK
         {
             CurrentDevice = InputDeviceType.MouseAndKeyboard;
             PreferredGamepadLayout = (GamepadLayoutType)PlayerPrefs.GetInt(PREF_KEY_GAMEPAD_LAYOUT, (int)GamepadLayoutType.Auto);
-            
-            OnDeviceChanged = null;
-            OnGamepadLayoutChanged = null;
-            
-            InputSystem.onEvent -= OnInputReceived; 
+
+            // Do not clear OnDeviceChanged / OnGamepadLayoutChanged here: Bootstrapper runs in the
+            // same SubsystemRegistration phase and services like CursorManager subscribe during Install().
+            InputSystem.onEvent -= OnInputReceived;
             InputSystem.onEvent += OnInputReceived;
             
             Application.quitting -= OnAppQuitting;
@@ -54,11 +54,28 @@ namespace NCDK
             InputSystem.onEvent -= OnInputReceived;
         }
 
-        /// <summary>Pointer movement (in pixels per frame) required before the mouse claims the active device.</summary>
+        /// <summary>Pointer movement (in pixels per frame) required before the mouse claims the active device when already using mouse/keyboard.</summary>
         const float MouseMovementThresholdPixels = 2f;
+
+        /// <summary>Larger pointer movement required to reclaim the active device from a gamepad (prevents desk jitter or lock warps).</summary>
+        const float MouseMovementThresholdFromGamepadPixels = 16f;
 
         /// <summary>Stick deflection required before a gamepad claims the active device.</summary>
         const float GamepadStickThreshold = 0.2f;
+
+        /// <summary>Cooldown after Cursor.lockState changes or switching to gamepad where mouse delta is ignored.</summary>
+        const float CursorLockDeltaCooldownSeconds = 0.15f;
+
+        static float _ignoreMouseDeltaUntilUnscaledTime;
+
+        /// <summary>
+        /// Notifies <see cref="EInput"/> that <see cref="Cursor.lockState"/> is about to change so the
+        /// resulting OS pointer-centering delta does not falsely switch back to mouse/keyboard.
+        /// </summary>
+        public static void NotifyCursorLockChanged()
+        {
+            _ignoreMouseDeltaUntilUnscaledTime = Time.unscaledTime + CursorLockDeltaCooldownSeconds;
+        }
 
         private static void OnInputReceived(InputEventPtr eventPtr, InputDevice device)
         {
@@ -87,6 +104,10 @@ namespace NCDK
             if (CurrentDevice != newDevice)
             {
                 CurrentDevice = newDevice;
+                if (newDevice == InputDeviceType.Gamepad)
+                {
+                    _ignoreMouseDeltaUntilUnscaledTime = Time.unscaledTime + CursorLockDeltaCooldownSeconds;
+                }
                 OnDeviceChanged?.Invoke(CurrentDevice);
             }
         }
@@ -96,8 +117,13 @@ namespace NCDK
             var mouse = Mouse.current;
             if (mouse != null)
             {
-                float threshold = MouseMovementThresholdPixels;
-                if (mouse.delta.ReadValue().sqrMagnitude >= threshold * threshold) return true;
+                if (Time.unscaledTime >= _ignoreMouseDeltaUntilUnscaledTime)
+                {
+                    float threshold = CurrentDevice == InputDeviceType.Gamepad
+                        ? MouseMovementThresholdFromGamepadPixels
+                        : MouseMovementThresholdPixels;
+                    if (mouse.delta.ReadValue().sqrMagnitude >= threshold * threshold) return true;
+                }
                 if (mouse.leftButton.isPressed || mouse.rightButton.isPressed || mouse.middleButton.isPressed) return true;
                 if (mouse.scroll.ReadValue().sqrMagnitude > 0f) return true;
             }
@@ -137,34 +163,17 @@ namespace NCDK
         }
 
         /// <summary>
-        /// Returns the final GamepadLayout to use. 
-        /// If set to Auto, it tries to detect the vendor via InputSystem (PlayStation/Switch). 
-        /// Otherwise it defaults to Xbox.
+        /// Returns the final GamepadLayout to use.
+        /// Defaults to <see cref="GamepadLayoutType.Positional"/> when set to <see cref="GamepadLayoutType.Auto"/>.
         /// </summary>
         public static GamepadLayoutType GetResolvedGamepadLayout()
         {
             if (PreferredGamepadLayout != GamepadLayoutType.Auto)
             {
-                return PreferredGamepadLayout; 
+                return PreferredGamepadLayout;
             }
 
-#if ENABLE_INPUT_SYSTEM
-            Gamepad pad = Gamepad.current;
-            if (pad != null)
-            {
-                if (pad is DualShockGamepad || pad.name.Contains("DualShock", StringComparison.OrdinalIgnoreCase) || pad.name.Contains("DualSense", StringComparison.OrdinalIgnoreCase))
-                {
-                    return GamepadLayoutType.PlayStation;
-                }
-
-                if (pad.name.Contains("Switch", StringComparison.OrdinalIgnoreCase) || pad.name.Contains("ProController", StringComparison.OrdinalIgnoreCase))
-                {
-                    return GamepadLayoutType.Nintendo;
-                }
-            }
-#endif
-            // Safe fallback
-            return GamepadLayoutType.Xbox;
+            return GamepadLayoutType.Positional;
         }
 
         public static bool IsAnySkipInputHeld()

@@ -24,6 +24,9 @@ namespace NCDK.Input
 
         [Tooltip("Sprites for Nintendo-like layout.")]
         public Sprite[] nintendoIcons;
+
+        [Tooltip("Sprites for positional/directional layout.")]
+        public Sprite[] positionalIcons;
         
         [Header("Animation Settings")]
         public float animationFPS;

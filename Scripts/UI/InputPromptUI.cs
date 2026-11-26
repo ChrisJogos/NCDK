@@ -164,6 +164,9 @@ namespace NCDK.UI
 
             switch (padLayout)
             {
+                case GamepadLayoutType.Positional:
+                    result = binding.positionalIcons;
+                    break;
                 case GamepadLayoutType.Nintendo:
                     result = binding.nintendoIcons;
                     break;
